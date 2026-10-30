@@ -1057,4 +1057,27 @@ mod tests {
         assert_eq!(h.app.session.doc.features.len(), 1, "a sketch with a line is kept");
         assert!(crate::scenario::handles("timeline:").iter().any(|(n, _)| n.contains("Sketch")));
     }
+
+    // #9457 regression guard: the Sketch Palette is placed from the viewport's right edge via a
+    // fixed anchor, so moving the pointer must not move it. At fractional DPI the placement is
+    // already pixel-snapped by egui's `round_area_position`, so a fixed viewport keeps the pane
+    // locked; this pins that invariant so a future change cannot reintroduce pointer-dependent
+    // jitter. (The reporter's real-world shake comes from their HiDPI display compositor drifting
+    // `vp.right()` frame to frame, which no code change can fully remove.)
+    #[test]
+    fn palette_right_edge_does_not_move_with_the_pointer_at_fractional_scale() {
+        let scale = 1.25;
+        let mut h = crate::scenario::Harness::new();
+        h.ctx.set_pixels_per_point(scale);
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.circle.center", json!({"center":[0,0],"radius":1})).unwrap();
+        h.call("ui.resize", json!({"width":1400,"height":900}));
+        h.settle();
+        let first = h.app.viewport.palette_rect.expect("palette shown while sketching").right();
+        for x in [120.0, 500.0, 900.0, 1280.0, 1350.0] {
+            h.frame_with(vec![egui::Event::PointerMoved(egui::pos2(x, 400.0))]);
+            let after = h.app.viewport.palette_rect.expect("palette still shown").right();
+            assert!((after - first).abs() < 1e-3, "palette right edge moved {after} from {first} on pointer move to {x}");
+        }
+    }
 }
